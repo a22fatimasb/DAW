@@ -1,0 +1,443 @@
+    1. Configurar dos servidores BIND:
+        1. Uno como servidor maestro con nombre DNS ns1.empresa-tarea-daw05.local en la IP 192.168.200.250.
+        2. Otro como servidor esclavo con nombre en la IP 192.168.200.249.
+        3. Con la posibilidad de transferencia de zona entre ellos.
+        4. Donde la zona del servidor maestro contiene los siguientes registros de recursos:
+            1. mail que apunta a la IP 192.168.100.249.
+            2. aplicacion-web que es un alias de www.redmine.empresa-tarea-daw05.local.
+        5. Donde la transferencia de zona se realiza de forma automática cuando se modifica la zona en el servidor maestro.
+Configuración del Servidor BIND Maestro (ns1.empresa-tarea-daw05.local - 192.168.200.250)
+Edita el archivo de configuración de red: sudo nano /etc/netplan/01-network-manager-all.yaml
+
+network:
+
+  version: 2
+
+  renderer: NetworkManager
+
+  ethernets:
+
+    enp0s3:
+
+      dhcp4: yes
+
+      addresses: [192.168.200.250/24]
+
+      routes:
+
+        - to: 0.0.0.0/0
+
+          via:  192.168.200.1
+
+      nameservers:
+
+        addresses: [192.168.200.250]
+
+       Aplica la configuración con el siguiente comando: sudo netplan apply
+       
+Actualizar repositorios do sistema operativo:
+sudo apt-get update
+Instalar os paquetes necesarios para BIND (bind9):
+sudo apt-get install bind9 bind9utils bind9-doc
+Verificar que o servidor BIND9 esté activo:
+sudo systemctl status bind9
+Asegúrate de que el firewall permita el tráfico de BIND:
+sudo ufw allow Bind9
+
+
+Actualizar configuracion DNS do sistema operativo 
+sudo nano /etc/nsswitch.conf  
+Dentro do arquivo modificar a liña hosts para que quede así --> hosts:   files dns
+
+sudo nano /etc/systemd/resolved.conf
+Agrega la siguiente línea o modifícala si ya existe:   DNS=192.168.200.250
+
+Actualizar resolv.conf
+Para o servicio resolved
+service systemd-resolved stop
+
+Desactivar as caches DNS
+resolvectl mdns enp0s3 no
+resolvectl llmnr enp0s3 no
+Comprobamos configuración
+resolvectl status
+Copia de seguridade do ficheiro resolv.conf
+mv /etc/resolv.conf /etc/resolv.conf.bak
+ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf
+ls -lah /etc/resolv.conf
+    
+Guarda el archivo y reinicia el servicio systemd-resolved:
+service systemd-resolved start
+
+Verificar en qué portos TCP y UDP está activo o servidor BIND9:
+sudo sudo apt install net-tools
+sudo netstat -natp | grep named
+
+Configuración xeral do servidor bind 
+Vamos a carpeta cd /etc/bind 
+sudo nano named.conf.options
+Engadimos ao arquivo
+acl "trusted" {
+        192.168.200.250;
+        192.168.200.249;
+};
+options {
+        directory "/var/cache/bind";
+        forwarders {
+                8.8.8.8;
+                8.8.4.4;
+        };
+        listen-on { any; };
+        allow-query { localhost; 192.168.200.0/24; };
+        dnssec-validation no;
+};
+
+Configuración da zona en /etc/bind/named.conf.local 
+sudo nano /etc/bind/named.conf.local 
+E escribimos:
+zone "empresa-tarea-daw05.local" IN {
+  type master;
+  file "/var/lib/bind/master/db.empresa-tarea-daw05.local.hosts";
+  allow-transfer { 192.168.200.249; }; 
+  notify yes;
+}; 
+
+Recargar o servidor BIND9:
+sudo systemctl reload bind9
+Creamos a ruta e despois verificamos a sintaxis do arquivo de configuracion
+sudo mkdir /var/lib/bind/master
+named-checkconf /etc/bind/named.conf.local
+
+Crear o arquivo de zona /var/lib/bind/master/db.empresa-tarea-daw05.local:
+sudo nano /var/lib/bind/master/db.empresa-tarea-daw05.local.hosts 
+Agregamos os rexistros de recursos segundo o requerido:
+$TTL 86400
+@ IN SOA empresa-tarea-daw05.local. admin.empresa-tarea-daw05.local. (
+    1           ; Serial
+    2h          ; Refresh
+    15m         ; Retry
+    1w          ; Expire
+    1h          ; Negative Cache TTL
+    )
+;
+        IN NS  ns1.empresa-tarea-daw05.local.
+        IN NS  ns2.empresa-tarea-daw05.local.
+ns1.empresa-tarea-daw05.local.  IN      A       192.168.200.250
+www.redmine.empresa-tarea-daw05.local.  IN      A       192.168.200.250
+mail.empresa-tarea-daw05.local. IN      A       192.168.200.249
+ns2.empresa-tarea-daw05.local. IN       A       192.168.200.249
+aplicacion-web.empresa-tarea-daw05.local.  IN CNAME www.redmine.empresa-tarea-daw05.local.
+
+Verficamos o arquivo con:
+named-checkzone empresa-tarea-daw05.local /var/lib/bind/master/db.empresa-tarea-daw05.local.hosts
+
+Recargar o servidor BIND9:
+sudo systemctl reload bind9
+
+Comprobación:
+nslookup aplicacion-web.empresa-tarea-daw05.local 
+
+Configuración del Servidor BIND Esclavo (192.168.200.249)
+Edita el archivo de configuración de red: sudo nano /etc/netplan/01-network-manager-all.yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s3:
+      dhcp4: yes
+      addresses: [192.168.200.249/24]
+      routes:
+        - to: 0.0.0.0/0
+          via:  192.168.200.1
+      nameservers:
+        addresses: [192.168.200.249]
+       Aplica la configuración con el siguiente comando: sudo netplan apply
+#Actualizar repositorios do sistema operativo:
+sudo apt-get update
+#Instalar os paquetes necesarios para BIND (bind9):
+sudo apt-get install bind9 bind9utils bind9-doc
+#Verificar que o servidor BIND9 esté activo:
+sudo systemctl status bind9
+#Asegúrate de que el firewall permita el tráfico de BIND:
+sudo ufw allow Bind9
+
+#Actualizar configuracion DNS do sistema operativo 
+sudo nano /etc/nsswitch.conf  
+Dentro do arquivo modificar a liña hosts para que quede así --> hosts:   files dns
+sudo nano /etc/systemd/resolved.conf
+Agrega la siguiente línea o modifícala si ya existe:   DNS=192.168.200.249
+
+Actualizar resolv.conf
+#Para o servicio resolved
+service systemd-resolved stop
+
+#Desactivar as caches DNS
+resolvectl mdns enp0s3 no
+resolvectl llmnr enp0s3 no
+#Comprobamos configuración
+resolvectl status
+#Copia de seguridade do ficheiro resolv.conf
+mv /etc/resolv.conf /etc/resolv.conf.bak
+ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf
+ls -lah /etc/resolv.conf
+    
+#Guarda el archivo y reinicia el servicio systemd-resolved:
+service systemd-resolved start
+
+#Verificar en qué portos TCP y UDP está activo o servidor BIND9:
+sudo sudo apt install net-tools
+sudo netstat -natp | grep named
+#Configuración xeral do servidor bind 
+sudo nano /etc/bind/named.conf.options
+Engadimos ao arquivo
+acl "trusted" {
+        192.168.200.250;
+        192.168.200.249;
+};
+options {
+        directory "/var/cache/bind";
+        forwarders {
+                8.8.8.8;
+                8.8.4.4;
+        };
+        listen-on { any; };
+        allow-query { localhost; 192.168.200.0/24; };
+        dnssec-validation no;
+};
+Configuración da zona en /etc/bind/named.conf.local:
+sudo nano /etc/bind/named.conf.local
+Agrega o siguiente:
+
+zone "empresa-tarea-daw05.local"  IN {
+    type slave;
+    masters { 192.168.200.250; };
+    file "/var/lib/bind/slave/db.empresa-tarea-daw05.local.hosts";
+};
+Verificar a sintaxis do arquivo de configuración:
+sudo mkdir /var/lib/bind/slave
+sudo named-checkconf /etc/bind/named.conf.local
+Reiniciar BIND9:
+sudo systemctl restart bind9
+
+Comprobación:
+nslookup aplicacion-web.empresa-tarea-daw05.local 
+
+    2. Configurar un servidor OpenLDAP con:
+No Servidor BIND Maestro (192.168.200.250)
+Actualizar repositorios do sistema operativo:
+sudo apt-get update
+Instala os paquetes necesarios para o funcionamiento de OpenLDAP. 
+apt-get install slapd ldap-utils 
+Contraseña del administrador: admin   Verificación de la contraseña: admin 
+Verifica que o servidor OpenLDAP está activo, por defecto, no puerto TCP 389.
+ netstat -natp | grep 389 
+
+        1. El nombre de dominio¨empresa-tarea-daw05.local.
+
+Configura el servidor OpenLDAP mediante el comando dpkg-reconfigure slapd. Los valores utilizados los puedes ver a continuación del comando: 
+
+ ¿Desea omitir la configuración del servidor OpenLDAP? No 
+ Introduzca su nombre de dominio DNS:  empresa-tarea-daw05.local
+ Nombre de la organización: empresa-tarea-daw05.local
+ Contraseña del administrador: admin 
+ Verificación de la contraseña: admin 
+ ¿Desea que se borre la base de datos cuando se purgue el paquete slapd? No 
+ ¿Desea mover la base de datos antigua? Sí 
+          
+service slapd start
+
+
+        2. Una estructura básica para atender a una unidad organizativa que contenga el departamento de atención al cliente.
+Elaboramos un ficheiro estructura-basica-tarea-daw05.ldif  para crear unha unidade organizacional “operador”:
+cd /etc/ldap 
+sudo nano estructura-basica-tarea-daw05.ldif 
+
+# Estructura básica para empresa-tarea-daw05.local
+dn: dc=empresa-tarea-daw05,dc=local
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+o: empresa-tarea-daw05.local
+dc: empresa-tarea-daw05
+
+# Unidad organizativa para operador
+
+dn: ou=operador,dc=empresa-tarea-daw05,dc=local
+objectClass: organizationalUnit
+ou: operador
+
+Revisamos el archivo /etc/ldap/slapd.d/cn\=config/olcDatabase\=\{1\}hdb.ldif 
+ldapadd -c -x -D cn=admin,dc=empresa-tarea-daw05,dc=local -w admin -f estructura-basica-tarea-daw05.ldif 
+
+        3. Un usuario que pertenezca al departamento de atención al cliente: op1 con contraseña oper.
+Creamos o archivo
+nano usuario-op1.ldif
+
+# Usuario op1
+dn: uid=op1,ou=operador,dc=empresa-tarea-daw05,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+cn: Operador
+sn: uno
+loginShell: /bin/bash
+uidNumber: 10011
+gidNumber: 10011
+homeDirectory: /home/op1
+gecos: Pruebas DAW05
+userPassword: oper
+mail: op1@empresa-tarea-daw05.local
+Desde la terminal: sudo ldapadd -c -x -D cn=admin,dc=empresa-tarea-daw05,dc=local -w admin -f usuario-op1.ldif
+
+Comprobar que está todo creado buscando en todo o directorio, tanto dominio, como OU como o usuario:
+ldapsearch -b "dc=empresa-tarea-daw05,dc=local" -s sub -x "(objectclass=*)"
+
+ENGADIR AO FICHEIRO de zona /var/lib/bind/master/db.empresa-tarea-daw05.local E INCREMENTAR O SERIAL
+sudo nano /var/lib/bind/master/db.empresa-tarea-daw05.local.hosts 
+Agregamos os rexistros de recursos segundo o requerido:
+
+openldap.empresa-tarea-daw05.local.     IN      CNAME www.redmine.empresa-tarea-daw05.local. 
+
+Reiniciar BIND9:
+sudo systemctl restart bind9
+
+
+
+
+
+
+
+
+    3. Revisar toda la estructura DIT del dominio empresa-tarea-daw05.local a través del servidor DNS esclavo.
+Configuración del Servidor BIND Esclavo (192.168.200.249)
+Actualizar repositorios do sistema operativo:
+sudo apt-get update
+Instala los paquetes necesarios para el funcionamiento de OpenLDAP. La instalación te pedirá una contraseña.
+apt-get install slapd ldap-utils 
+Contraseña del administrador: admin   Verificación de la contraseña: admin 
+Verifica que el servidor OpenLDAP está activo, por defecto, en el puerto TCP 389.
+ netstat -natp | grep 389 
+          
+service slapd start
+
+Finalmente executamos o comando:
+ldapsearch -H ldap://openldap.empresa-tarea-daw05.local -b "dc=empresa-tarea-daw05,dc=local" -s sub -x "(objectclass=*)"
+
+
+
+
+Instalación Redmine
+1. Actualiza los repositorios del sistema operativo:
+apt update
+
+Instala dependencias ruby 
+apt install build-essential zlib1g-dev libyaml-dev libssl-dev libgdm-dev libreadline-dev libncurses5-dev libffi-dev curl openssh-server checkinstall libxml2-dev libxslt1-dev libcurl4-openssl-dev libicu-dev logrotate rsync ruby-dev
+
+Instala ruby
+apt install ruby-full
+
+Instala apache (configúrase despois)
+apt install apache2 libapache2-mod-passenger
+
+Instalar MySQL:
+apt-get install mysql-server mysql-client libmysqlclient-dev
+Instalar y configurar MariaDB
+apt install mariadb-server libmysqlclient-dev -y 
+systemctl enable --now mariadb 
+service mariadb start
+
+Se da error de masked
+systemctl unmask mysql.service
+systemctl unmask mariadb.service
+service mariadb start
+service mariadb status
+
+Accede a Mariadb con comando MySQL:
+
+mysql -u root -p
+En MySQL, crea una base de datos para Redmine y un usuario:
+
+CREATE DATABASE redmine CHARACTER SET utf8mb4;
+CREATE USER 'redmine'@'localhost' IDENTIFIED BY 'abc123.';
+GRANT ALL PRIVILEGES ON redmine.* TO 'redmine'@'localhost';
+
+ Git:
+
+sudo apt install git
+
+
+Navega hasta el directorio /opt:
+
+cd /opt
+Clona el repositorio de Redmine desde GitHub:
+
+sudo git clone https://github.com/redmine/redmine.git
+
+
+
+
+Regresa al directorio de Redmine:
+
+cd /opt/redmine
+git checkout 5.1.0
+
+Copia el archivo de configuración de ejemplo de la base de datos y edita database.yml:
+
+cp config/database.yml.example config/database.yml
+sudo nano config/database.yml
+
+Dentro de database.yml, asegúrate de que la configuración para producción sea la siguiente:
+production:
+  adapter: mysql2
+  database: redmine
+  host: localhost
+  username: “redmine”
+  password: “abc123.”
+  encoding: utf8mb4
+  variables:
+     tx_isolation: “READ-COMMITTED”  
+
+#Instala Ruby Bundler:
+gem install bundler
+#Instala las gemas necesarias con Bundler:
+bundle install --without development test
+#Prepara la base de datos
+bundle exec rake generate_secret_token
+RAILS_ENV=production bundle exec rake db:migrate
+
+
+Configurar apache
+a2enmod passenger
+systemctl restart apache2
+
+Configurar site e darlle permisos a apache
+chmod a+x -R /opt/redmine
+nano /etc/apache2/sites-available/redmine.conf
+
+Editar
+<VirtualHost *:80>
+
+        ServerName aplicacion-web.empresa-tarea-daw05.local
+
+        ServerAlias www.redmine.empresa-tarea-daw05.local
+
+        DocumentRoot /opt/redmine/public
+
+        <Directory /opt/redmine/public>
+
+                Order allow,deny
+
+                Allow from all
+
+                Require all granted
+
+                AllowOverride all
+
+                Options -MultiViews
+
+        </Directory>
+
+</VirtualHost>
+
+activar site e arrancar apache (isto provoca  que se arranque Redmine, xa que estará xestionado por apache)
+a2ensite redmine
+systemctl restart apache2
